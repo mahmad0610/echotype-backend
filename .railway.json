@@ -1,0 +1,26 @@
+{
+  "build": {
+    "builder": "NIXPACKS",
+    "nixpacksPlan": {
+      "providers": ["java", "python"],
+      "setup": [
+        {
+          "name": "java",
+          "version": "21"
+        },
+        {
+          "name": "python",
+          "version": "3.9"
+        }
+      ],
+      "phases": {
+        "setup": {
+          "cmds": ["pip install -r requirements.txt"]
+        },
+        "build": {
+          "cmds": ["chmod +x ./mvnw", "./mvnw -DoutputFile=target/mvn-dependency-list.log -B -DskipTests clean dependency:list install"]
+        }
+      }
+    }
+  }
+}
