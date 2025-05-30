@@ -5,11 +5,12 @@ FROM openjdk:21-jdk-slim AS builder
 WORKDIR /app
 
 # Install system dependencies for Python, pip, and whisper
-RUN apt-get update && apt-get install -y python3 python3-pip python3-dev ffmpeg libsndfile1 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y python3 python3-venv python3-dev ffmpeg libsndfile1 && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements.txt and install Python dependencies
+# Create a virtual environment and install Python dependencies
+RUN python3 -m venv venv
 COPY requirements.txt .
-RUN pip3 install -r requirements.txt
+RUN ./venv/bin/pip install -r requirements.txt
 
 # Copy project files
 COPY . .
@@ -18,8 +19,10 @@ COPY . .
 RUN chmod +x mvnw
 RUN ./mvnw -B -DskipTests clean install
 
-# Final stage: Run the application
+# Final stage: Run the application with the virtual environment
 FROM openjdk:21-jdk-slim
 WORKDIR /app
 COPY --from=builder /app/target/echotype-0.0.1-SNAPSHOT.jar .
+COPY --from=builder /app/venv ./venv
+ENV PATH="/app/venv/bin:$PATH"
 CMD ["java", "-jar", "echotype-0.0.1-SNAPSHOT.jar"]
