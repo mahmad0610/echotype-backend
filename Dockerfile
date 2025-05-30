@@ -4,13 +4,15 @@ FROM openjdk:21-jdk-slim AS builder
 # Set working directory
 WORKDIR /app
 
-# Copy project files
-COPY . .
+# Install system dependencies for Python, pip, and whisper
+RUN apt-get update && apt-get install -y python3 python3-pip python3-dev ffmpeg libsndfile1 && rm -rf /var/lib/apt/lists/*
 
-# Install Python and dependencies for the scripts
-RUN apt-get update && apt-get install -y python3 python3-pip && rm -rf /var/lib/apt/lists/*
+# Copy requirements.txt and install Python dependencies
 COPY requirements.txt .
 RUN pip3 install -r requirements.txt
+
+# Copy project files
+COPY . .
 
 # Build the application with Maven
 RUN chmod +x mvnw
