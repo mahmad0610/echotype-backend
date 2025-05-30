@@ -18,7 +18,7 @@
           "cmds": ["pip install -r requirements.txt"]
         },
         "build": {
-          "cmds": ["chmod +x ./mvnw", "./mvnw -DoutputFile=target/mvn-dependency-list.log -B -DskipTests clean dependency:list install"]
+          "cmds": ["chmod +x ./mvnw", "./mvnw -B -DskipTests clean install"]
         }
       }
     }
