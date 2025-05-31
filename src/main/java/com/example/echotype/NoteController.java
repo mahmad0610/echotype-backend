@@ -4,45 +4,141 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import java.io.*;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @RestController
-@CrossOrigin(origins = "*") // Allow CORS for Flutter app
+@CrossOrigin(origins = "*")
 public class NoteController {
 
+    private static final Logger logger = LoggerFactory.getLogger(NoteController.class);
+
     @PostMapping("/transcribe")
-    public Map<String, String> transcribeAudio(@RequestParam("audio") MultipartFile audioFile) throws IOException, InterruptedException {
-        // Save the uploaded audio file
-        File tempFile = File.createTempFile("audio", ".wav");
-        audioFile.transferTo(tempFile);
-
-        // Run Whisper transcription (transcribe.py)
-        String scriptPath = "E:\\FLUTTER\\echotype\\backend\\src\\main\\resources\\scripts\\transcribe.py";
-        ProcessBuilder whisperPb = new ProcessBuilder("python3", scriptPath, tempFile.getAbsolutePath());
-        Process whisperProcess = whisperPb.start();
-        BufferedReader whisperReader = new BufferedReader(new InputStreamReader(whisperProcess.getInputStream()));
-        String transcription = whisperReader.lines().reduce("", String::concat);
-        whisperProcess.waitFor();
-
-        // Run Gemini formatting (format_notes.py)
-        File tempTranscription = File.createTempFile("transcription", ".txt");
-        Files.writeString(tempTranscription.toPath(), transcription);
-        scriptPath = "E:\\FLUTTER\\echotype\\backend\\src\\main\\resources\\scripts\\format_notes.py";
-        ProcessBuilder geminiPb = new ProcessBuilder("python3", scriptPath, tempTranscription.getAbsolutePath());
-        Process geminiProcess = geminiPb.start();
-        BufferedReader geminiReader = new BufferedReader(new InputStreamReader(geminiProcess.getInputStream()));
-        String formattedNotes = geminiReader.lines().reduce("", String::concat);
-        geminiProcess.waitFor();
-
-        // Clean up temp files
-        tempFile.delete();
-        tempTranscription.delete();
-
-        // Return response
+    public Map<String, String> transcribeAudio(@RequestParam("audio") MultipartFile audioFile) {
         Map<String, String> response = new HashMap<>();
-        response.put("formattedNotes", formattedNotes);
-        return response;
+        try {
+            File tempFile = File.createTempFile("audio", ".wav");
+            audioFile.transferTo(tempFile);
+            logger.info("Audio file saved to: {}", tempFile.getAbsolutePath());
+
+            String scriptPath = "/app/src/main/resources/scripts/transcribe.py";
+            ProcessBuilder whisperPb = new ProcessBuilder("/app/venv/bin/python3", scriptPath, tempFile.getAbsolutePath());
+            whisperPb.redirectErrorStream(true);
+            Process whisperProcess = whisperPb.start();
+            StringBuilder transcriptionOutput = new StringBuilder();
+            try (BufferedReader whisperReader = new BufferedReader(new InputStreamReader(whisperProcess.getInputStream()))) {
+                String line;
+                while ((line = whisperReader.readLine()) != null) {
+                    transcriptionOutput.append(line).append("\n");
+                }
+            }
+            int whisperExitCode = whisperProcess.waitFor();
+            if (whisperExitCode != 0) {
+                logger.error("Whisper transcription failed with exit code {}: {}", whisperExitCode, transcriptionOutput.toString());
+                response.put("error", "Transcription failed: " + transcriptionOutput.toString());
+                return response;
+            }
+            String transcription = transcriptionOutput.toString().trim();
+            logger.info("Transcription: {}", transcription);
+
+            scriptPath = "/app/src/main/resources/scripts/format_notes.py";
+            File tempTranscription = File.createTempFile("transcription", ".txt");
+            Files.writeString(tempTranscription.toPath(), transcription);
+            logger.info("Transcription file saved to: {}", tempTranscription.getAbsolutePath());
+
+            ProcessBuilder geminiPb = new ProcessBuilder("/app/venv/bin/python3", scriptPath, tempTranscription.getAbsolutePath());
+            geminiPb.redirectErrorStream(true);
+            Process geminiProcess = geminiPb.start();
+            StringBuilder formattingOutput = new StringBuilder();
+            try (BufferedReader geminiReader = new BufferedReader(new InputStreamReader(geminiProcess.getInputStream()))) {
+                String line;
+                while ((line = geminiReader.readLine()) != null) {
+                    formattingOutput.append(line).append("\n");
+                }
+            }
+            int geminiExitCode = geminiProcess.waitFor();
+            if (geminiExitCode != 0) {
+                logger.error("Formatting failed with exit code {}: {}", geminiExitCode, formattingOutput.toString());
+                response.put("error", "Formatting failed: " + formattingOutput.toString());
+                return response;
+            }
+            String formattedNotes = formattingOutput.toString().trim();
+            logger.info("Formatted Notes: {}", formattedNotes);
+
+            tempFile.delete();
+            tempTranscription.delete();
+
+            response.put("formattedNotes", formattedNotes.isEmpty() ? "No notes generated" : formattedNotes);
+            return response;
+
+        } catch (IOException | InterruptedException e) {
+            logger.error("Error processing audio: {}", e.getMessage(), e);
+            response.put("error", "Failed to process audio: " + e.getMessage());
+            return response;
+        }
+    }
+
+    @GetMapping("/test-whisper")
+    public Map<String, String> testWhisper() {
+        Map<String, String> response = new HashMap<>();
+        try {
+            File tempFile = File.createTempFile("test", ".txt");
+            Files.writeString(tempFile.toPath(), "This is a test file for Whisper");
+            String scriptPath = "/app/src/main/resources/scripts/transcribe.py";
+            ProcessBuilder pb = new ProcessBuilder("/app/venv/bin/python3", scriptPath, tempFile.getAbsolutePath());
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                }
+            }
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                response.put("error", "Whisper test failed: " + output.toString());
+                return response;
+            }
+            response.put("result", "Whisper test successful: " + output.toString());
+            tempFile.delete();
+            return response;
+        } catch (IOException | InterruptedException e) {
+            response.put("error", "Whisper test failed: " + e.getMessage());
+            return response;
+        }
+    }
+
+    @GetMapping("/test-gemini")
+    public Map<String, String> testGemini() {
+        Map<String, String> response = new HashMap<>();
+        try {
+            File tempFile = File.createTempFile("test", ".txt");
+            Files.writeString(tempFile.toPath(), "This is a test transcription for Gemini");
+            String scriptPath = "/app/src/main/resources/scripts/format_notes.py";
+            ProcessBuilder pb = new ProcessBuilder("/app/venv/bin/python3", scriptPath, tempFile.getAbsolutePath());
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                }
+            }
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                response.put("error", "Gemini test failed: " + output.toString());
+                return response;
+            }
+            response.put("result", "Gemini test successful: " + output.toString());
+            tempFile.delete();
+            return response;
+        } catch (IOException | InterruptedException e) {
+            response.put("error", "Gemini test failed: " + e.getMessage());
+            return response;
+        }
     }
 }
