@@ -1,20 +1,13 @@
 import sys
 import logging
+import whisper
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 try:
-    import whisper
-    logger.info("Whisper module imported successfully")
-except ImportError as e:
-    logger.error("Failed to import whisper: %s", str(e))
-    print(f"Error: Failed to import whisper: {str(e)}", file=sys.stderr)
-    sys.exit(1)
-
-try:
     logger.info("Loading Whisper model...")
-    model = whisper.load_model("base")
+    model = whisper.load_model("small", download_root="/tmp")
     logger.info(f"Model loaded: {model}")
     logger.info(f"Transcribing file: {sys.argv[1]}")
     result = model.transcribe(sys.argv[1])
