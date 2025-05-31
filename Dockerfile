@@ -2,7 +2,8 @@ FROM maven:3.9.9-eclipse-temurin-21 AS builder
 WORKDIR /app
 RUN apt-get update && apt-get install -y python3 python3-venv ffmpeg libsndfile1 && rm -rf /var/lib/apt/lists/*
 RUN python3 -m venv venv
-RUN ./venv/bin/pip install --no-cache-dir pip setuptools wheel  # Ensure pip is installed
+RUN ./venv/bin/python -m ensurepip --upgrade  # Ensure pip is available
+RUN ./venv/bin/pip install --no-cache-dir pip setuptools wheel  # Upgrade pip
 COPY requirements.txt .
 RUN ./venv/bin/pip install --no-cache-dir -r requirements.txt && rm -rf ~/.cache/pip
 COPY . .
