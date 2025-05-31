@@ -1,2 +1,2 @@
-openai-whisper==2023.6.15
+openai-whisper==20230314
 google-generativeai
