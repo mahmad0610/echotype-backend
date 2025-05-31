@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 try:
     logger.info("Loading Whisper model...")
-    model = whisper.load_model("small", download_root="/tmp")
+    model = whisper.load_model("tiny", download_root="/tmp")
     logger.info(f"Model loaded: {model}")
     logger.info(f"Transcribing file: {sys.argv[1]}")
     result = model.transcribe(sys.argv[1])
