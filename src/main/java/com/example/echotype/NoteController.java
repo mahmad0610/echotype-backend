@@ -7,15 +7,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.core.io.ClassPathResource;
 
 @RestController
 @CrossOrigin(origins = "*")
 public class NoteController {
 
     private static final Logger logger = LoggerFactory.getLogger(NoteController.class);
+    private static final int PROCESS_TIMEOUT_SECONDS = 300; // 5 minutes
 
     @PostMapping("/transcribe")
     public Map<String, String> transcribeAudio(@RequestParam("audio") MultipartFile audioFile) {
@@ -29,7 +30,7 @@ public class NoteController {
             audioFile.transferTo(tempFile);
             logger.info("Audio file saved to: {}", tempFile.getAbsolutePath());
 
-            // Run transcribe.py script
+            // Run transcribe.py script with timeout
             ProcessBuilder whisperPb = new ProcessBuilder(
                 "python3", 
                 "/app/scripts/transcribe.py", 
@@ -41,17 +42,26 @@ public class NoteController {
             StringBuilder transcriptionOutput = new StringBuilder();
             try (BufferedReader whisperReader = new BufferedReader(
                     new InputStreamReader(whisperProcess.getInputStream()))) {
+                // Wait for process to complete with timeout
+                boolean completed = whisperProcess.waitFor(PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                if (!completed) {
+                    whisperProcess.destroy();
+                    throw new InterruptedException("Whisper transcription timed out after " + 
+                                                 PROCESS_TIMEOUT_SECONDS + " seconds");
+                }
+                
+                // Read output after process completes
                 String line;
                 while ((line = whisperReader.readLine()) != null) {
                     transcriptionOutput.append(line).append("\n");
                 }
             }
             
-            int whisperExitCode = whisperProcess.waitFor();
+            int whisperExitCode = whisperProcess.exitValue();
             if (whisperExitCode != 0) {
                 logger.error("Whisper transcription failed with exit code {}: {}", 
                             whisperExitCode, transcriptionOutput.toString());
-                response.put("error", "Transcription failed: " + transcriptionOutput.toString());
+                response.put("error", "Transcription failed (code " + whisperExitCode + "): " + transcriptionOutput.toString());
                 return response;
             }
             
@@ -63,7 +73,7 @@ public class NoteController {
             Files.writeString(tempTranscription.toPath(), transcription);
             logger.info("Transcription file saved to: {}", tempTranscription.getAbsolutePath());
 
-            // Run format_notes.py script
+            // Run format_notes.py script with timeout
             ProcessBuilder geminiPb = new ProcessBuilder(
                 "python3", 
                 "/app/scripts/format_notes.py", 
@@ -75,17 +85,26 @@ public class NoteController {
             StringBuilder formattingOutput = new StringBuilder();
             try (BufferedReader geminiReader = new BufferedReader(
                     new InputStreamReader(geminiProcess.getInputStream()))) {
+                // Wait for process to complete with timeout
+                boolean completed = geminiProcess.waitFor(PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                if (!completed) {
+                    geminiProcess.destroy();
+                    throw new InterruptedException("Gemini formatting timed out after " + 
+                                                  PROCESS_TIMEOUT_SECONDS + " seconds");
+                }
+                
+                // Read output after process completes
                 String line;
                 while ((line = geminiReader.readLine()) != null) {
                     formattingOutput.append(line).append("\n");
                 }
             }
             
-            int geminiExitCode = geminiProcess.waitFor();
+            int geminiExitCode = geminiProcess.exitValue();
             if (geminiExitCode != 0) {
                 logger.error("Formatting failed with exit code {}: {}", 
                             geminiExitCode, formattingOutput.toString());
-                response.put("error", "Formatting failed: " + formattingOutput.toString());
+                response.put("error", "Formatting failed (code " + geminiExitCode + "): " + formattingOutput.toString());
                 return response;
             }
             
@@ -126,15 +145,24 @@ public class NoteController {
             StringBuilder output = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(process.getInputStream()))) {
+                // Wait for process to complete with timeout
+                boolean completed = process.waitFor(PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                if (!completed) {
+                    process.destroy();
+                    throw new InterruptedException("Whisper test timed out after " + 
+                                                 PROCESS_TIMEOUT_SECONDS + " seconds");
+                }
+                
+                // Read output after process completes
                 String line;
                 while ((line = reader.readLine()) != null) {
                     output.append(line).append("\n");
                 }
             }
             
-            int exitCode = process.waitFor();
+            int exitCode = process.exitValue();
             if (exitCode != 0) {
-                response.put("error", "Whisper test failed: " + output.toString());
+                response.put("error", "Whisper test failed (code " + exitCode + "): " + output.toString());
                 return response;
             }
             
@@ -168,15 +196,24 @@ public class NoteController {
             StringBuilder output = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(process.getInputStream()))) {
+                // Wait for process to complete with timeout
+                boolean completed = process.waitFor(PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                if (!completed) {
+                    process.destroy();
+                    throw new InterruptedException("Gemini test timed out after " + 
+                                                 PROCESS_TIMEOUT_SECONDS + " seconds");
+                }
+                
+                // Read output after process completes
                 String line;
                 while ((line = reader.readLine()) != null) {
                     output.append(line).append("\n");
                 }
             }
             
-            int exitCode = process.waitFor();
+            int exitCode = process.exitValue();
             if (exitCode != 0) {
-                response.put("error", "Gemini test failed: " + output.toString());
+                response.put("error", "Gemini test failed (code " + exitCode + "): " + output.toString());
                 return response;
             }
             
