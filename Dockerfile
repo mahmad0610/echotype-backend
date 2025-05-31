@@ -19,14 +19,10 @@ COPY . .
 RUN chmod +x mvnw
 RUN ./mvnw -B -DskipTests clean install
 
-# Final stage: Run the application with the virtual environment
+# Final stage: Run the application
 FROM openjdk:21-jdk-slim
 WORKDIR /app
 COPY --from=builder /app/target/echotype-0.0.1-SNAPSHOT.jar .
 COPY --from=builder /app/venv ./venv
 ENV PATH="/app/venv/bin:$PATH"
-<<<<<<< HEAD
 CMD ["java", "-jar", "echotype-0.0.1-SNAPSHOT.jar"]
-=======
-CMD ["java", "-jar", "echotype-0.0.1-SNAPSHOT.jar"]
->>>>>>> 6f125e1 (Update Dockerfile to use virtual environment for Python packages)
