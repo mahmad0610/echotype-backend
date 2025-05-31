@@ -5,6 +5,7 @@ RUN python3 -m venv venv
 COPY requirements.txt .
 RUN ./venv/bin/pip install --no-cache-dir -r requirements.txt && rm -rf ~/.cache/pip
 COPY . .
+RUN chmod +x mvnw  # Ensure this runs after COPY
 RUN ./mvnw -B -DskipTests clean install
 
 FROM openjdk:21-jdk-slim
