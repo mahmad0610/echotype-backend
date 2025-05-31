@@ -30,10 +30,14 @@ public class NoteController {
     @PostMapping("/transcribe")
     public Map<String, String> transcribeAudio(@RequestParam("audio") MultipartFile audioFile) {
         Map<String, String> response = new HashMap<>();
+        // Declare all temp files at method scope
+        File tempFile = null;
+        File tempTranscription = null;
         File tempTranscribeScript = null;
         File tempFormatScript = null;
+        
         try {
-            File tempFile = File.createTempFile("audio", ".wav");
+            tempFile = File.createTempFile("audio", ".wav");
             audioFile.transferTo(tempFile);
             logger.info("Audio file saved to: {}", tempFile.getAbsolutePath());
 
@@ -60,7 +64,7 @@ public class NoteController {
             String transcription = transcriptionOutput.toString().trim();
             logger.info("Transcription: {}", transcription);
 
-            File tempTranscription = File.createTempFile("transcription", ".txt");
+            tempTranscription = File.createTempFile("transcription", ".txt");
             Files.writeString(tempTranscription.toPath(), transcription);
             logger.info("Transcription file saved to: {}", tempTranscription.getAbsolutePath());
 
@@ -95,6 +99,7 @@ public class NoteController {
             response.put("error", "Failed to process audio: " + e.getMessage());
             return response;
         } finally {
+            // Now all variables are in scope
             if (tempFile != null && tempFile.exists()) tempFile.delete();
             if (tempTranscription != null && tempTranscription.exists()) tempTranscription.delete();
             if (tempTranscribeScript != null && tempTranscribeScript.exists()) tempTranscribeScript.delete();
@@ -105,9 +110,11 @@ public class NoteController {
     @GetMapping("/test-whisper")
     public Map<String, String> testWhisper() {
         Map<String, String> response = new HashMap<>();
+        File tempFile = null;  // Declare at method scope
         File tempScript = null;
+        
         try {
-            File tempFile = File.createTempFile("test", ".wav");
+            tempFile = File.createTempFile("test", ".wav");
             Files.writeString(tempFile.toPath(), "This is a test file for Whisper");
             tempScript = extractScriptFromClasspath("transcribe.py");
             ProcessBuilder pb = new ProcessBuilder("/app/venv/bin/python3", tempScript.getAbsolutePath(), tempFile.getAbsolutePath());
@@ -131,6 +138,7 @@ public class NoteController {
             response.put("error", "Whisper test failed: " + e.getMessage());
             return response;
         } finally {
+            // Now in scope
             if (tempFile != null && tempFile.exists()) tempFile.delete();
             if (tempScript != null && tempScript.exists()) tempScript.delete();
         }
@@ -139,9 +147,11 @@ public class NoteController {
     @GetMapping("/test-gemini")
     public Map<String, String> testGemini() {
         Map<String, String> response = new HashMap<>();
+        File tempFile = null;  // Declare at method scope
         File tempScript = null;
+        
         try {
-            File tempFile = File.createTempFile("test", ".txt");
+            tempFile = File.createTempFile("test", ".txt");
             Files.writeString(tempFile.toPath(), "This is a test transcription for Gemini");
             tempScript = extractScriptFromClasspath("format_notes.py");
             ProcessBuilder pb = new ProcessBuilder("/app/venv/bin/python3", tempScript.getAbsolutePath(), tempFile.getAbsolutePath());
@@ -165,6 +175,7 @@ public class NoteController {
             response.put("error", "Gemini test failed: " + e.getMessage());
             return response;
         } finally {
+            // Now in scope
             if (tempFile != null && tempFile.exists()) tempFile.delete();
             if (tempScript != null && tempScript.exists()) tempScript.delete();
         }
