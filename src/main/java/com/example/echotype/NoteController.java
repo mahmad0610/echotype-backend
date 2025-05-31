@@ -17,77 +17,78 @@ public class NoteController {
 
     private static final Logger logger = LoggerFactory.getLogger(NoteController.class);
 
-    private File extractScriptFromClasspath(String scriptName) throws IOException {
-        ClassPathResource resource = new ClassPathResource("scripts/" + scriptName);
-        File tempScript = File.createTempFile(scriptName.replace(".py", ""), ".py");
-        try (InputStream inputStream = resource.getInputStream()) {
-            Files.copy(inputStream, tempScript.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-        }
-        tempScript.setExecutable(true);
-        return tempScript;
-    }
-
     @PostMapping("/transcribe")
     public Map<String, String> transcribeAudio(@RequestParam("audio") MultipartFile audioFile) {
         Map<String, String> response = new HashMap<>();
-        // Declare all temp files at method scope
         File tempFile = null;
         File tempTranscription = null;
-        File tempTranscribeScript = null;
-        File tempFormatScript = null;
         
         try {
+            // Create temporary audio file
             tempFile = File.createTempFile("audio", ".wav");
             audioFile.transferTo(tempFile);
             logger.info("Audio file saved to: {}", tempFile.getAbsolutePath());
 
-            // Extract transcribe.py from JAR
-            tempTranscribeScript = extractScriptFromClasspath("transcribe.py");
-            logger.info("Transcribe script extracted to: {}", tempTranscribeScript.getAbsolutePath());
-
-            ProcessBuilder whisperPb = new ProcessBuilder("/app/venv/bin/python3", tempTranscribeScript.getAbsolutePath(), tempFile.getAbsolutePath());
+            // Run transcribe.py script
+            ProcessBuilder whisperPb = new ProcessBuilder(
+                "python3", 
+                "/app/scripts/transcribe.py", 
+                tempFile.getAbsolutePath()
+            );
             whisperPb.redirectErrorStream(true);
             Process whisperProcess = whisperPb.start();
+            
             StringBuilder transcriptionOutput = new StringBuilder();
-            try (BufferedReader whisperReader = new BufferedReader(new InputStreamReader(whisperProcess.getInputStream()))) {
+            try (BufferedReader whisperReader = new BufferedReader(
+                    new InputStreamReader(whisperProcess.getInputStream()))) {
                 String line;
                 while ((line = whisperReader.readLine()) != null) {
                     transcriptionOutput.append(line).append("\n");
                 }
             }
+            
             int whisperExitCode = whisperProcess.waitFor();
             if (whisperExitCode != 0) {
-                logger.error("Whisper transcription failed with exit code {}: {}", whisperExitCode, transcriptionOutput.toString());
+                logger.error("Whisper transcription failed with exit code {}: {}", 
+                            whisperExitCode, transcriptionOutput.toString());
                 response.put("error", "Transcription failed: " + transcriptionOutput.toString());
                 return response;
             }
+            
             String transcription = transcriptionOutput.toString().trim();
             logger.info("Transcription: {}", transcription);
 
+            // Create temporary transcription file
             tempTranscription = File.createTempFile("transcription", ".txt");
             Files.writeString(tempTranscription.toPath(), transcription);
             logger.info("Transcription file saved to: {}", tempTranscription.getAbsolutePath());
 
-            // Extract format_notes.py from JAR
-            tempFormatScript = extractScriptFromClasspath("format_notes.py");
-            logger.info("Format script extracted to: {}", tempFormatScript.getAbsolutePath());
-
-            ProcessBuilder geminiPb = new ProcessBuilder("/app/venv/bin/python3", tempFormatScript.getAbsolutePath(), tempTranscription.getAbsolutePath());
+            // Run format_notes.py script
+            ProcessBuilder geminiPb = new ProcessBuilder(
+                "python3", 
+                "/app/scripts/format_notes.py", 
+                tempTranscription.getAbsolutePath()
+            );
             geminiPb.redirectErrorStream(true);
             Process geminiProcess = geminiPb.start();
+            
             StringBuilder formattingOutput = new StringBuilder();
-            try (BufferedReader geminiReader = new BufferedReader(new InputStreamReader(geminiProcess.getInputStream()))) {
+            try (BufferedReader geminiReader = new BufferedReader(
+                    new InputStreamReader(geminiProcess.getInputStream()))) {
                 String line;
                 while ((line = geminiReader.readLine()) != null) {
                     formattingOutput.append(line).append("\n");
                 }
             }
+            
             int geminiExitCode = geminiProcess.waitFor();
             if (geminiExitCode != 0) {
-                logger.error("Formatting failed with exit code {}: {}", geminiExitCode, formattingOutput.toString());
+                logger.error("Formatting failed with exit code {}: {}", 
+                            geminiExitCode, formattingOutput.toString());
                 response.put("error", "Formatting failed: " + formattingOutput.toString());
                 return response;
             }
+            
             String formattedNotes = formattingOutput.toString().trim();
             logger.info("Formatted Notes: {}", formattedNotes);
 
@@ -99,85 +100,93 @@ public class NoteController {
             response.put("error", "Failed to process audio: " + e.getMessage());
             return response;
         } finally {
-            // Now all variables are in scope
+            // Clean up temporary files
             if (tempFile != null && tempFile.exists()) tempFile.delete();
             if (tempTranscription != null && tempTranscription.exists()) tempTranscription.delete();
-            if (tempTranscribeScript != null && tempTranscribeScript.exists()) tempTranscribeScript.delete();
-            if (tempFormatScript != null && tempFormatScript.exists()) tempFormatScript.delete();
         }
     }
 
     @GetMapping("/test-whisper")
     public Map<String, String> testWhisper() {
         Map<String, String> response = new HashMap<>();
-        File tempFile = null;  // Declare at method scope
-        File tempScript = null;
+        File tempFile = null;
         
         try {
             tempFile = File.createTempFile("test", ".wav");
             Files.writeString(tempFile.toPath(), "This is a test file for Whisper");
-            tempScript = extractScriptFromClasspath("transcribe.py");
-            ProcessBuilder pb = new ProcessBuilder("/app/venv/bin/python3", tempScript.getAbsolutePath(), tempFile.getAbsolutePath());
+            
+            ProcessBuilder pb = new ProcessBuilder(
+                "python3", 
+                "/app/scripts/transcribe.py", 
+                tempFile.getAbsolutePath()
+            );
             pb.redirectErrorStream(true);
             Process process = pb.start();
+            
             StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream()))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     output.append(line).append("\n");
                 }
             }
+            
             int exitCode = process.waitFor();
             if (exitCode != 0) {
                 response.put("error", "Whisper test failed: " + output.toString());
                 return response;
             }
+            
             response.put("result", "Whisper test successful: " + output.toString());
             return response;
         } catch (IOException | InterruptedException e) {
             response.put("error", "Whisper test failed: " + e.getMessage());
             return response;
         } finally {
-            // Now in scope
             if (tempFile != null && tempFile.exists()) tempFile.delete();
-            if (tempScript != null && tempScript.exists()) tempScript.delete();
         }
     }
 
     @GetMapping("/test-gemini")
     public Map<String, String> testGemini() {
         Map<String, String> response = new HashMap<>();
-        File tempFile = null;  // Declare at method scope
-        File tempScript = null;
+        File tempFile = null;
         
         try {
             tempFile = File.createTempFile("test", ".txt");
             Files.writeString(tempFile.toPath(), "This is a test transcription for Gemini");
-            tempScript = extractScriptFromClasspath("format_notes.py");
-            ProcessBuilder pb = new ProcessBuilder("/app/venv/bin/python3", tempScript.getAbsolutePath(), tempFile.getAbsolutePath());
+            
+            ProcessBuilder pb = new ProcessBuilder(
+                "python3", 
+                "/app/scripts/format_notes.py", 
+                tempFile.getAbsolutePath()
+            );
             pb.redirectErrorStream(true);
             Process process = pb.start();
+            
             StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream()))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     output.append(line).append("\n");
                 }
             }
+            
             int exitCode = process.waitFor();
             if (exitCode != 0) {
                 response.put("error", "Gemini test failed: " + output.toString());
                 return response;
             }
+            
             response.put("result", "Gemini test successful: " + output.toString());
             return response;
         } catch (IOException | InterruptedException e) {
             response.put("error", "Gemini test failed: " + e.getMessage());
             return response;
         } finally {
-            // Now in scope
             if (tempFile != null && tempFile.exists()) tempFile.delete();
-            if (tempScript != null && tempScript.exists()) tempScript.delete();
         }
     }
 }
