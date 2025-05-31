@@ -1,2 +1,2 @@
 whisper
-google-generative-ai
+google-generativeai
