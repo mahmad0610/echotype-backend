@@ -3,7 +3,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y python3 python3-venv ffmpeg libsndfile1 && rm -rf /var/lib/apt/lists/*
 RUN python3 -m venv venv
 COPY requirements.txt .
-RUN ./venv/bin/pip install --no-cache-dir -r requirements.txt
+RUN ./venv/bin/pip install --no-cache-dir --no-deps -r requirements.txt
 COPY . .
 RUN chmod +x mvnw
 RUN ./mvnw -B -DskipTests clean install
