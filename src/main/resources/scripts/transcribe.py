@@ -1,19 +1,9 @@
 import sys
 import logging
-import subprocess
+import whisper
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-try:
-    logger.info("Installing openai-whisper and torch...")
-    subprocess.run([sys.executable, "-m", "pip", "install", "--no-cache-dir", "openai-whisper==20230314", "torch", "--extra-index-url", "https://download.pytorch.org/whl/cpu"], check=True)
-    import whisper
-    logger.info("Whisper module imported successfully")
-except Exception as e:
-    logger.error(f"Error installing dependencies: {str(e)}")
-    print(f"Error: {str(e)}", file=sys.stderr)
-    sys.exit(1)
 
 try:
     logger.info("Loading Whisper model...")
