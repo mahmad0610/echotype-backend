@@ -10,145 +10,207 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.io.ClassPathResource;
 
 @RestController
 @CrossOrigin(origins = "*")
 public class NoteController {
 
     private static final Logger logger = LoggerFactory.getLogger(NoteController.class);
-    private static final int PROCESS_TIMEOUT_SECONDS = 60; // Reduced to 1 minute
+
+    private File extractScriptFromClasspath(String scriptName) throws IOException {
+        logger.info("Extracting script: {}", scriptName);
+        ClassPathResource resource = new ClassPathResource("scripts/" + scriptName);
+        File tempScript = File.createTempFile(scriptName.replace(".py", ""), ".py");
+        try (InputStream inputStream = resource.getInputStream()) {
+            Files.copy(inputStream, tempScript.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+        tempScript.setExecutable(true);
+        logger.info("Script extracted to: {}", tempScript.getAbsolutePath());
+        return tempScript;
+    }
 
     @PostMapping("/transcribe")
-public Map<String, String> transcribeAudio(@RequestParam("audio") MultipartFile audioFile) {
-    Map<String, String> response = new HashMap<>();
-    File tempFile = null;
-    
-    try {
-        // Create temporary audio file
-        tempFile = File.createTempFile("audio_", ".wav");
-        audioFile.transferTo(tempFile);
-        logger.info("Saved audio to: {}", tempFile.getAbsolutePath());
+    public Map<String, String> transcribeAudio(@RequestParam("audio") MultipartFile audioFile) {
+        Map<String, String> response = new HashMap<>();
+        File tempFile = null;
+        File tempTranscription = null;
+        File tempTranscribeScript = null;
+        File tempFormatScript = null;
+        
+        try {
+            logger.info("Received /transcribe request with file: {}", audioFile.getOriginalFilename());
+            
+            // Create temp audio file
+            tempFile = File.createTempFile("audio", ".wav");
+            audioFile.transferTo(tempFile);
+            logger.info("Audio file saved to: {}", tempFile.getAbsolutePath());
 
-        // Build process with absolute paths
-        ProcessBuilder whisperPb = new ProcessBuilder(
-            "python3",
-            "/app/scripts/transcribe.py",  // Updated to Docker container path
-            tempFile.getAbsolutePath()
-        );
-        
-        // Redirect errors to merge with standard output
-        whisperPb.redirectErrorStream(true);
-        
-        // Start process with timeout
-        Process whisperProcess = whisperPb.start();
-        StringBuilder output = new StringBuilder();
-        
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(whisperProcess.getInputStream()))) {
+            // Extract and execute transcribe script
+            tempTranscribeScript = extractScriptFromClasspath("transcribe.py");
+            logger.info("Starting transcription process...");
             
-            // Read output while process runs
-            String line;
-            while ((line = reader.readLine()) != null) {
-                output.append(line).append("\n");
-                logger.debug("Whisper: {}", line);
+            ProcessBuilder whisperPb = new ProcessBuilder("/app/venv/bin/python3", 
+                                                        tempTranscribeScript.getAbsolutePath(), 
+                                                        tempFile.getAbsolutePath());
+            whisperPb.redirectErrorStream(true);
+            Process whisperProcess = whisperPb.start();
+            
+            StringBuilder transcriptionOutput = new StringBuilder();
+            try (BufferedReader whisperReader = new BufferedReader(
+                    new InputStreamReader(whisperProcess.getInputStream()))) {
+                String line;
+                while ((line = whisperReader.readLine()) != null) {
+                    logger.info("Transcription output: {}", line);
+                    transcriptionOutput.append(line).append("\n");
+                }
             }
             
-            // Wait with timeout
-            boolean completed = whisperProcess.waitFor(5, TimeUnit.MINUTES);
+            // Add timeout for transcription process
+            boolean completed = whisperProcess.waitFor(300, TimeUnit.SECONDS);
             if (!completed) {
-                whisperProcess.destroyForcibly();
-                throw new RuntimeException("Transcription timed out after 5 minutes");
+                whisperProcess.destroy();
+                logger.error("Transcription process timed out after 5 minutes");
+                response.put("error", "Transcription timed out");
+                return response;
             }
             
-            // Check exit status
-            int exitCode = whisperProcess.exitValue();
-            if (exitCode != 0) {
-                throw new RuntimeException(String.format(
-                    "Transcription failed (code %d): %s",
-                    exitCode,
-                    output.toString().trim()
-                ));
+            int whisperExitCode = whisperProcess.exitValue();
+            if (whisperExitCode != 0) {
+                logger.error("Transcription failed with exit code: {}", whisperExitCode);
+                response.put("error", "Transcription failed with code: " + whisperExitCode);
+                return response;
             }
             
-            // Success case
-            String transcription = output.toString().trim();
-            response.put("transcription", transcription);
-            logger.info("Successfully transcribed audio");
+            String transcription = transcriptionOutput.toString().trim();
+            logger.info("Transcription completed successfully: {}", transcription);
+
+            // Save transcription to temp file
+            tempTranscription = File.createTempFile("transcription", ".txt");
+            Files.writeString(tempTranscription.toPath(), transcription);
+            logger.info("Transcription saved to: {}", tempTranscription.getAbsolutePath());
+
+            // Extract and execute formatting script
+            tempFormatScript = extractScriptFromClasspath("format_notes.py");
+            logger.info("Starting formatting process...");
             
+            ProcessBuilder geminiPb = new ProcessBuilder("/app/venv/bin/python3", 
+                                                       tempFormatScript.getAbsolutePath(), 
+                                                       tempTranscription.getAbsolutePath());
+            geminiPb.redirectErrorStream(true);
+            Process geminiProcess = geminiPb.start();
+            
+            StringBuilder formattingOutput = new StringBuilder();
+            try (BufferedReader geminiReader = new BufferedReader(
+                    new InputStreamReader(geminiProcess.getInputStream()))) {
+                String line;
+                while ((line = geminiReader.readLine()) != null) {
+                    logger.info("Formatting output: {}", line);
+                    formattingOutput.append(line).append("\n");
+                }
+            }
+            
+            // Add timeout for formatting process
+            completed = geminiProcess.waitFor(120, TimeUnit.SECONDS);
+            if (!completed) {
+                geminiProcess.destroy();
+                logger.error("Formatting process timed out after 2 minutes");
+                response.put("error", "Formatting timed out");
+                return response;
+            }
+            
+            int geminiExitCode = geminiProcess.exitValue();
+            if (geminiExitCode != 0) {
+                logger.error("Formatting failed with exit code: {}", geminiExitCode);
+                response.put("error", "Formatting failed with code: " + geminiExitCode);
+                return response;
+            }
+            
+            String formattedNotes = formattingOutput.toString().trim();
+            logger.info("Formatting completed successfully: {}", formattedNotes);
+
+            response.put("formattedNotes", formattedNotes.isEmpty() ? "No notes generated" : formattedNotes);
+            return response;
+
+        } catch (IOException | InterruptedException e) {
+            logger.error("Error processing audio: {}", e.getMessage(), e);
+            response.put("error", "Failed to process audio: " + e.getMessage());
+            return response;
         } finally {
-            whisperProcess.destroy();
+            // Clean up temporary files
+            deleteTempFile(tempFile);
+            deleteTempFile(tempTranscription);
+            deleteTempFile(tempTranscribeScript);
+            deleteTempFile(tempFormatScript);
         }
-        
-    } catch (IOException e) {
-        logger.error("File operation failed: {}", e.getMessage());
-        response.put("error", "File processing error: " + e.getMessage());
-    } catch (InterruptedException e) {
-        logger.error("Transcription interrupted: {}", e.getMessage());
-        Thread.currentThread().interrupt();
-        response.put("error", "Processing interrupted");
-    } catch (Exception e) {
-        logger.error("Transcription failed: {}", e.getMessage());
-        response.put("error", "Transcription error: " + e.getMessage());
-    } finally {
-        // Clean up temp file
-        if (tempFile != null && tempFile.exists()) {
-            try {
-                Files.delete(tempFile.toPath());
-            } catch (IOException e) {
-                logger.warn("Could not delete temp file: {}", tempFile.getAbsolutePath());
+    }
+
+    private void deleteTempFile(File file) {
+        if (file != null && file.exists()) {
+            if (file.delete()) {
+                logger.info("Deleted temp file: {}", file.getAbsolutePath());
+            } else {
+                logger.warn("Failed to delete temp file: {}", file.getAbsolutePath());
             }
         }
     }
-    
-    return response;
-}
+
     @GetMapping("/test-whisper")
     public Map<String, String> testWhisper() {
         Map<String, String> response = new HashMap<>();
         File tempFile = null;
+        File tempScript = null;
         
         try {
+            logger.info("Starting Whisper test...");
             tempFile = File.createTempFile("test", ".wav");
             Files.writeString(tempFile.toPath(), "This is a test file for Whisper");
+            logger.info("Created test audio file: {}", tempFile.getAbsolutePath());
             
-            ProcessBuilder pb = new ProcessBuilder(
-                "python3", 
-                "/app/scripts/transcribe.py", 
-                tempFile.getAbsolutePath()
-            );
+            tempScript = extractScriptFromClasspath("transcribe.py");
+            logger.info("Starting test transcription...");
+            
+            ProcessBuilder pb = new ProcessBuilder("/app/venv/bin/python3", 
+                                                 tempScript.getAbsolutePath(), 
+                                                 tempFile.getAbsolutePath());
             pb.redirectErrorStream(true);
             Process process = pb.start();
             
             StringBuilder output = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(process.getInputStream()))) {
-                // Wait for process to complete with timeout
-                boolean completed = process.waitFor(PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                if (!completed) {
-                    process.destroy();
-                    throw new RuntimeException("Test process timed out");
-                }
-                
-                // Read output after process completes
                 String line;
                 while ((line = reader.readLine()) != null) {
+                    logger.info("Test transcription output: {}", line);
                     output.append(line).append("\n");
                 }
             }
             
-            int exitCode = process.exitValue();
-            if (exitCode != 0) {
-                response.put("error", "Whisper test failed (code " + exitCode + "): " + output.toString());
+            boolean completed = process.waitFor(60, TimeUnit.SECONDS);
+            if (!completed) {
+                process.destroy();
+                logger.error("Whisper test timed out");
+                response.put("error", "Whisper test timed out");
                 return response;
             }
             
+            int exitCode = process.exitValue();
+            if (exitCode != 0) {
+                logger.error("Whisper test failed with exit code: {}", exitCode);
+                response.put("error", "Whisper test failed: " + output.toString());
+                return response;
+            }
+            
+            logger.info("Whisper test completed successfully");
             response.put("result", "Whisper test successful: " + output.toString());
             return response;
-        } catch (Exception e) {
+        } catch (IOException | InterruptedException e) {
+            logger.error("Whisper test failed: {}", e.getMessage(), e);
             response.put("error", "Whisper test failed: " + e.getMessage());
             return response;
         } finally {
-            if (tempFile != null && tempFile.exists()) tempFile.delete();
+            deleteTempFile(tempFile);
+            deleteTempFile(tempScript);
         }
     }
 
@@ -156,49 +218,58 @@ public Map<String, String> transcribeAudio(@RequestParam("audio") MultipartFile 
     public Map<String, String> testGemini() {
         Map<String, String> response = new HashMap<>();
         File tempFile = null;
+        File tempScript = null;
         
         try {
+            logger.info("Starting Gemini test...");
             tempFile = File.createTempFile("test", ".txt");
             Files.writeString(tempFile.toPath(), "This is a test transcription for Gemini");
+            logger.info("Created test transcription file: {}", tempFile.getAbsolutePath());
             
-            ProcessBuilder pb = new ProcessBuilder(
-                "python3", 
-                "/app/scripts/format_notes.py", 
-                tempFile.getAbsolutePath()
-            );
+            tempScript = extractScriptFromClasspath("format_notes.py");
+            logger.info("Starting test formatting...");
+            
+            ProcessBuilder pb = new ProcessBuilder("/app/venv/bin/python3", 
+                                                 tempScript.getAbsolutePath(), 
+                                                 tempFile.getAbsolutePath());
             pb.redirectErrorStream(true);
             Process process = pb.start();
             
             StringBuilder output = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(process.getInputStream()))) {
-                // Wait for process to complete with timeout
-                boolean completed = process.waitFor(PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                if (!completed) {
-                    process.destroy();
-                    throw new RuntimeException("Test process timed out");
-                }
-                
-                // Read output after process completes
                 String line;
                 while ((line = reader.readLine()) != null) {
+                    logger.info("Test formatting output: {}", line);
                     output.append(line).append("\n");
                 }
             }
             
-            int exitCode = process.exitValue();
-            if (exitCode != 0) {
-                response.put("error", "Gemini test failed (code " + exitCode + "): " + output.toString());
+            boolean completed = process.waitFor(60, TimeUnit.SECONDS);
+            if (!completed) {
+                process.destroy();
+                logger.error("Gemini test timed out");
+                response.put("error", "Gemini test timed out");
                 return response;
             }
             
+            int exitCode = process.exitValue();
+            if (exitCode != 0) {
+                logger.error("Gemini test failed with exit code: {}", exitCode);
+                response.put("error", "Gemini test failed: " + output.toString());
+                return response;
+            }
+            
+            logger.info("Gemini test completed successfully");
             response.put("result", "Gemini test successful: " + output.toString());
             return response;
-        } catch (Exception e) {
+        } catch (IOException | InterruptedException e) {
+            logger.error("Gemini test failed: {}", e.getMessage(), e);
             response.put("error", "Gemini test failed: " + e.getMessage());
             return response;
         } finally {
-            if (tempFile != null && tempFile.exists()) tempFile.delete();
+            deleteTempFile(tempFile);
+            deleteTempFile(tempScript);
         }
     }
 }
