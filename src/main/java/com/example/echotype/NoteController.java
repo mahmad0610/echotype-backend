@@ -16,7 +16,7 @@ import org.slf4j.LoggerFactory;
 public class NoteController {
 
     private static final Logger logger = LoggerFactory.getLogger(NoteController.class);
-    private static final int PROCESS_TIMEOUT_SECONDS = 300; // 5 minutes
+    private static final int PROCESS_TIMEOUT_SECONDS = 60; // Reduced to 1 minute
 
     @PostMapping("/transcribe")
     public Map<String, String> transcribeAudio(@RequestParam("audio") MultipartFile audioFile) {
@@ -46,8 +46,7 @@ public class NoteController {
                 boolean completed = whisperProcess.waitFor(PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 if (!completed) {
                     whisperProcess.destroy();
-                    throw new InterruptedException("Whisper transcription timed out after " + 
-                                                 PROCESS_TIMEOUT_SECONDS + " seconds");
+                    throw new RuntimeException("Transcription process timed out");
                 }
                 
                 // Read output after process completes
@@ -89,8 +88,7 @@ public class NoteController {
                 boolean completed = geminiProcess.waitFor(PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 if (!completed) {
                     geminiProcess.destroy();
-                    throw new InterruptedException("Gemini formatting timed out after " + 
-                                                  PROCESS_TIMEOUT_SECONDS + " seconds");
+                    throw new RuntimeException("Formatting process timed out");
                 }
                 
                 // Read output after process completes
@@ -114,7 +112,7 @@ public class NoteController {
             response.put("formattedNotes", formattedNotes.isEmpty() ? "No notes generated" : formattedNotes);
             return response;
 
-        } catch (IOException | InterruptedException e) {
+        } catch (Exception e) {
             logger.error("Error processing audio: {}", e.getMessage(), e);
             response.put("error", "Failed to process audio: " + e.getMessage());
             return response;
@@ -149,8 +147,7 @@ public class NoteController {
                 boolean completed = process.waitFor(PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 if (!completed) {
                     process.destroy();
-                    throw new InterruptedException("Whisper test timed out after " + 
-                                                 PROCESS_TIMEOUT_SECONDS + " seconds");
+                    throw new RuntimeException("Test process timed out");
                 }
                 
                 // Read output after process completes
@@ -168,7 +165,7 @@ public class NoteController {
             
             response.put("result", "Whisper test successful: " + output.toString());
             return response;
-        } catch (IOException | InterruptedException e) {
+        } catch (Exception e) {
             response.put("error", "Whisper test failed: " + e.getMessage());
             return response;
         } finally {
@@ -200,8 +197,7 @@ public class NoteController {
                 boolean completed = process.waitFor(PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 if (!completed) {
                     process.destroy();
-                    throw new InterruptedException("Gemini test timed out after " + 
-                                                 PROCESS_TIMEOUT_SECONDS + " seconds");
+                    throw new RuntimeException("Test process timed out");
                 }
                 
                 // Read output after process completes
@@ -219,7 +215,7 @@ public class NoteController {
             
             response.put("result", "Gemini test successful: " + output.toString());
             return response;
-        } catch (IOException | InterruptedException e) {
+        } catch (Exception e) {
             response.put("error", "Gemini test failed: " + e.getMessage());
             return response;
         } finally {
