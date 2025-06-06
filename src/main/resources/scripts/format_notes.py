@@ -47,9 +47,24 @@ def main():
         model = GenerativeModel("gemini-1.5-flash")
         logger.info("Gemini API configured successfully")
 
-        # Format the transcription
+        # Format the transcription into detailed notes
         logger.info("Formatting transcription...")
-        prompt = f"Format the following transcription into concise, readable notes:\n\n{transcription}"
+        prompt = f"""
+You are an advanced note-taking assistant. Your task is to take the raw transcription provided below, which may include incomplete thoughts, single words, or fragmented ideas, and transform it into detailed, well-structured notes. Follow these guidelines:
+
+- Interpret the transcription, even if it's a single word or fragmented, and expand on the ideas logically.
+- Organize the content into a clear structure using bullet points and paragraphs where appropriate.
+- Provide detailed explanations or context for each idea or topic mentioned in the transcription.
+- Include relevant references to Google search queries and YouTube videos to support the content (e.g., 'For more information, search Google for "topic" or watch this YouTube video: [video title](URL)').
+- Use markdown formatting for bullet points, headings, and links.
+
+Here is the raw transcription to format:
+
+**Transcription:**
+{transcription}
+
+Now, generate the detailed notes based on the transcription above.
+"""
         response = model.generate_content(prompt)
         formatted_notes = response.text.strip()
 
