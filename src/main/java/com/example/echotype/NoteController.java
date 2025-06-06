@@ -33,178 +33,174 @@ public class NoteController {
     }
 
     @PostMapping("/transcribe")
-    public Map<String, String> transcribeAudio(@RequestParam("audio") MultipartFile audioFile) {
-        Map<String, String> response = new HashMap<>();
-        File tempFile = null;
-        File tempTranscription = null;
-        File tempTranscribeScript = null;
-        File tempFormatScript = null;
+public Map<String, String> transcribeAudio(@RequestParam("audio") MultipartFile audioFile) {
+    Map<String, String> response = new HashMap<>();
+    File tempFile = null;
+    File tempTranscription = null;
+    File tempTranscribeScript = null;
+    File tempFormatScript = null;
 
-        try {
-            logger.info("Received /transcribe request with file: {}", audioFile.getOriginalFilename());
+    try {
+        logger.info("Received /transcribe request with file: {}", audioFile.getOriginalFilename());
 
-            // Create temp audio file
-            tempFile = File.createTempFile("audio", ".wav");
-            audioFile.transferTo(tempFile);
-            logger.info("Audio file saved to: {}", tempFile.getAbsolutePath());
+        // Create temp audio file
+        tempFile = File.createTempFile("audio", ".wav");
+        audioFile.transferTo(tempFile);
+        logger.info("Audio file saved to: {}, size: {} bytes", tempFile.getAbsolutePath(), tempFile.length());
 
-            // Extract and execute transcribe script
-            tempTranscribeScript = extractScriptFromClasspath("transcribe.py");
-            logger.info("Starting transcription process...");
+        // Extract and execute transcribe script
+        tempTranscribeScript = extractScriptFromClasspath("transcribe.py");
+        logger.info("Starting transcription process...");
 
-            ProcessBuilder whisperPb = new ProcessBuilder("python3", 
-                                                        tempTranscribeScript.getAbsolutePath(), 
-                                                        tempFile.getAbsolutePath());
-            // Do not redirect error stream to stdout to separate logs and transcription
-            Process whisperProcess = whisperPb.start();
+        ProcessBuilder whisperPb = new ProcessBuilder("python3", 
+                                                    tempTranscribeScript.getAbsolutePath(), 
+                                                    tempFile.getAbsolutePath());
+        Process whisperProcess = whisperPb.start();
 
-            StringBuilder transcriptionOutput = new StringBuilder();
-            StringBuilder transcriptionLogs = new StringBuilder();
-            // Capture stdout (transcription result)
-            Thread stdoutThread = new Thread(() -> {
-                try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(whisperProcess.getInputStream()))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        // Check if the line looks like a log message (e.g., starts with timestamp)
-                        if (line.matches("\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2},\\d{3}\\s+\\[\\w+\\].*")) {
-                            logger.info("Transcription log: {}", line);
-                            transcriptionLogs.append(line).append("\n");
-                        } else {
-                            // Assume this is the actual transcription
-                            transcriptionOutput.append(line).append("\n");
-                        }
-                    }
-                } catch (IOException e) {
-                    logger.error("Error reading transcription stdout: {}", e.getMessage());
-                }
-            });
-            stdoutThread.start();
-
-            // Capture stderr (logs and errors)
-            Thread stderrThread = new Thread(() -> {
-                try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(whisperProcess.getErrorStream()))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        logger.error("Transcription error: {}", line);
+        StringBuilder transcriptionOutput = new StringBuilder();
+        StringBuilder transcriptionLogs = new StringBuilder();
+        Thread stdoutThread = new Thread(() -> {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(whisperProcess.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (line.matches("\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2},\\d{3}\\s+\\[\\w+\\].*")) {
+                        logger.info("Transcription log: {}", line);
                         transcriptionLogs.append(line).append("\n");
+                    } else if (line.matches("\\s*\\d+%.*")) {
+                        logger.debug("Transcription progress: {}", line);
+                    } else {
+                        logger.info("Transcription result: {}", line);
+                        transcriptionOutput.append(line).append("\n");
                     }
-                } catch (IOException e) {
-                    logger.error("Error reading transcription stderr: {}", e.getMessage());
                 }
-            });
-            stderrThread.start();
-
-            // Add timeout for transcription process
-            boolean completed = whisperProcess.waitFor(300, TimeUnit.SECONDS);
-            stdoutThread.join();
-            stderrThread.join();
-
-            if (!completed) {
-                whisperProcess.destroy();
-                logger.error("Transcription process timed out after 5 minutes");
-                response.put("error", "Transcription timed out");
-                return response;
+            } catch (IOException e) {
+                logger.error("Error reading transcription stdout: {}", e.getMessage());
             }
+        });
+        stdoutThread.start();
 
-            int whisperExitCode = whisperProcess.exitValue();
-            if (whisperExitCode != 0) {
-                logger.error("Transcription failed with exit code: {}, logs: {}", whisperExitCode, transcriptionLogs.toString());
-                response.put("error", "Transcription failed with code: " + whisperExitCode + ", logs: " + transcriptionLogs.toString());
-                return response;
+        Thread stderrThread = new Thread(() -> {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(whisperProcess.getErrorStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    logger.error("Transcription error: {}", line);
+                    transcriptionLogs.append(line).append("\n");
+                }
+            } catch (IOException e) {
+                logger.error("Error reading transcription stderr: {}", e.getMessage());
             }
+        });
+        stderrThread.start();
 
-            String transcription = transcriptionOutput.toString().trim();
-            logger.info("Transcription completed successfully: {}", transcription);
+        boolean completed = whisperProcess.waitFor(300, TimeUnit.SECONDS);
+        stdoutThread.join();
+        stderrThread.join();
 
-            // Save transcription to temp file
-            tempTranscription = File.createTempFile("transcription", ".txt");
-            Files.writeString(tempTranscription.toPath(), transcription);
-            logger.info("Transcription saved to: {}", tempTranscription.getAbsolutePath());
+        if (!completed) {
+            whisperProcess.destroy();
+            logger.error("Transcription process timed out after 5 minutes");
+            response.put("error", "Transcription timed out");
+            return response;
+        }
 
-            // Extract and execute formatting script
-            tempFormatScript = extractScriptFromClasspath("format_notes.py");
-            logger.info("Starting formatting process...");
+        int whisperExitCode = whisperProcess.exitValue();
+        if (whisperExitCode != 0) {
+            logger.error("Transcription failed with exit code: {}, logs: {}", whisperExitCode, transcriptionLogs.toString());
+            response.put("error", "Transcription failed with code: " + whisperExitCode + ", logs: " + transcriptionLogs.toString());
+            return response;
+        }
 
-            ProcessBuilder geminiPb = new ProcessBuilder("python3", 
-                                                       tempFormatScript.getAbsolutePath(), 
-                                                       tempTranscription.getAbsolutePath());
-            geminiPb.redirectErrorStream(true);
-            Process geminiProcess = geminiPb.start();
+        String transcription = transcriptionOutput.toString().trim();
+        logger.info("Transcription completed successfully: {}", transcription);
 
-            StringBuilder formattingOutput = new StringBuilder();
-            StringBuilder formattingError = new StringBuilder();
-            // Capture stdout
-            Thread formatStdoutThread = new Thread(() -> {
-                try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(geminiProcess.getInputStream()))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        logger.info("Formatting output: {}", line);
+        // Save transcription to temp file
+        tempTranscription = File.createTempFile("transcription", ".txt");
+        Files.writeString(tempTranscription.toPath(), transcription);
+        logger.info("Transcription saved to: {}", tempTranscription.getAbsolutePath());
+
+        // Extract and execute formatting script
+        tempFormatScript = extractScriptFromClasspath("format_notes.py");
+        logger.info("Starting formatting process...");
+
+        ProcessBuilder geminiPb = new ProcessBuilder("python3", 
+                                                   tempFormatScript.getAbsolutePath(), 
+                                                   tempTranscription.getAbsolutePath());
+        // Do not redirect error stream to stdout to separate logs and formatted notes
+        Process geminiProcess = geminiPb.start();
+
+        StringBuilder formattingOutput = new StringBuilder();
+        StringBuilder formattingLogs = new StringBuilder();
+        Thread formatStdoutThread = new Thread(() -> {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(geminiProcess.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (line.matches("\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2},\\d{3}\\s+\\[\\w+\\].*")) {
+                        logger.info("Formatting log: {}", line);
+                        formattingLogs.append(line).append("\n");
+                    } else {
+                        logger.info("Formatting result: {}", line);
                         formattingOutput.append(line).append("\n");
                     }
-                } catch (IOException e) {
-                    logger.error("Error reading formatting stdout: {}", e.getMessage());
                 }
-            });
-            formatStdoutThread.start();
+            } catch (IOException e) {
+                logger.error("Error reading formatting stdout: {}", e.getMessage());
+            }
+        });
+        formatStdoutThread.start();
 
-            // Capture stderr
-            Thread formatStderrThread = new Thread(() -> {
-                try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(geminiProcess.getErrorStream()))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        logger.error("Formatting error: {}", line);
-                        formattingError.append(line).append("\n");
-                    }
-                } catch (IOException e) {
-                    logger.error("Error reading formatting stderr: {}", e.getMessage());
+        Thread formatStderrThread = new Thread(() -> {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(geminiProcess.getErrorStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    logger.error("Formatting error: {}", line);
+                    formattingLogs.append(line).append("\n");
                 }
-            });
-            formatStderrThread.start();
-
-            // Add timeout for formatting process
-            completed = geminiProcess.waitFor(120, TimeUnit.SECONDS);
-            formatStdoutThread.join();
-            formatStderrThread.join();
-
-            if (!completed) {
-                geminiProcess.destroy();
-                logger.error("Formatting process timed out after 2 minutes");
-                response.put("error", "Formatting timed out");
-                return response;
+            } catch (IOException e) {
+                logger.error("Error reading formatting stderr: {}", e.getMessage());
             }
+        });
+        formatStderrThread.start();
 
-            int geminiExitCode = geminiProcess.exitValue();
-            if (geminiExitCode != 0) {
-                logger.error("Formatting failed with exit code: {}, error: {}", geminiExitCode, formattingError.toString());
-                response.put("error", "Formatting failed with code: " + geminiExitCode + ", error: " + formattingError.toString());
-                return response;
-            }
+        completed = geminiProcess.waitFor(120, TimeUnit.SECONDS);
+        formatStdoutThread.join();
+        formatStderrThread.join();
 
-            String formattedNotes = formattingOutput.toString().trim();
-            logger.info("Formatting completed successfully: {}", formattedNotes);
-
-            // Include logs in the response for debugging
-            response.put("transcription", transcription.isEmpty() ? "No transcription generated" : transcription);
-            response.put("formattedNotes", formattedNotes.isEmpty() ? transcriptionLogs.toString().trim() : formattedNotes);
+        if (!completed) {
+            geminiProcess.destroy();
+            logger.error("Formatting process timed out after 2 minutes");
+            response.put("error", "Formatting timed out");
             return response;
-
-        } catch (IOException | InterruptedException e) {
-            logger.error("Error processing audio: {}", e.getMessage(), e);
-            response.put("error", "Failed to process audio: " + e.getMessage());
-            return response;
-        } finally {
-            // Clean up temporary files
-            deleteTempFile(tempFile);
-            deleteTempFile(tempTranscription);
-            deleteTempFile(tempTranscribeScript);
-            deleteTempFile(tempFormatScript);
         }
-    }
 
+        int geminiExitCode = geminiProcess.exitValue();
+        if (geminiExitCode != 0) {
+            logger.error("Formatting failed with exit code: {}, logs: {}", geminiExitCode, formattingLogs.toString());
+            response.put("error", "Formatting failed with code: " + geminiExitCode + ", logs: " + formattingLogs.toString());
+            return response;
+        }
+
+        String formattedNotes = formattingOutput.toString().trim();
+        logger.info("Formatting completed successfully: {}", formattedNotes);
+
+        response.put("transcription", transcription.isEmpty() ? "No transcription generated" : transcription);
+        response.put("formattedNotes", formattedNotes.isEmpty() ? formattingLogs.toString().trim() : formattedNotes);
+        return response;
+
+    } catch (IOException | InterruptedException e) {
+        logger.error("Error processing audio: {}", e.getMessage(), e);
+        response.put("error", "Failed to process audio: " + e.getMessage());
+        return response;
+    } finally {
+        deleteTempFile(tempFile);
+        deleteTempFile(tempTranscription);
+        deleteTempFile(tempTranscribeScript);
+        deleteTempFile(tempFormatScript);
+    }
+}
     private void deleteTempFile(File file) {
         if (file != null && file.exists()) {
             if (file.delete()) {
