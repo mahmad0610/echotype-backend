@@ -6,22 +6,48 @@ import os
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
-try:
-    audio_file = sys.argv[1]
-    logger.info(f"Checking audio file: {audio_file}")
-    if not os.path.exists(audio_file):
-        logger.error(f"Audio file not found: {audio_file}")
+def main():
+    try:
+        # Check if audio file path is provided
+        if len(sys.argv) != 2:
+            logger.error("Audio file path not provided")
+            print("Error: Audio file path not provided", file=sys.stderr)
+            sys.exit(1)
+
+        audio_file = sys.argv[1]
+        logger.info(f"Checking audio file: {audio_file}")
+
+        # Verify audio file exists and is readable
+        if not os.path.exists(audio_file):
+            logger.error(f"Audio file not found: {audio_file}")
+            print(f"Error: Audio file not found: {audio_file}", file=sys.stderr)
+            sys.exit(1)
+        if os.path.getsize(audio_file) == 0:
+            logger.warning(f"Audio file is empty: {audio_file}")
+            print("Warning: Audio file is empty", file=sys.stderr)
+
+        # Load the Whisper model
+        logger.info("Loading Whisper tiny model...")
+        model = whisper.load_model("tiny", download_root="/tmp", in_memory=False)
+        logger.info("Model loaded successfully")
+
+        # Transcribe the audio file
+        logger.info(f"Transcribing file: {audio_file}")
+        result = model.transcribe(audio_file, fp16=False)
+        transcription = result.get("text", "").strip()
+
+        # Log and print the transcription result
+        logger.info(f"Transcription result: {transcription}")
+        print(transcription if transcription else "No transcription detected")
+
+    except whisper.WhisperError as e:
+        logger.error(f"Whisper transcription error: {str(e)}")
+        print(f"Error: Whisper transcription failed - {str(e)}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Unexpected error during transcription: {str(e)}")
+        print(f"Error: Unexpected failure - {str(e)}", file=sys.stderr)
         sys.exit(1)
 
-    logger.info("Loading Whisper tiny model...")
-    model = whisper.load_model("tiny", download_root="/tmp", in_memory=False)  # Avoid loading model into memory
-    logger.info("Model loaded successfully")
-
-    logger.info(f"Transcribing file: {audio_file}")
-    result = model.transcribe(audio_file, fp16=False)  # Disable FP16 to reduce memory usage
-    logger.info(f"Transcription result: {result['text']}")
-    print(result["text"])
-except Exception as e:
-    logger.error(f"Transcription error: {str(e)}")
-    print(f"Error: {str(e)}", file=sys.stderr)
-    sys.exit(1)
+if __name__ == "__main__":
+    main()
