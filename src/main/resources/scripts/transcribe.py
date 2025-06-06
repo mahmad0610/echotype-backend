@@ -26,15 +26,15 @@ def main():
             logger.warning(f"Audio file is empty: {audio_file}")
             print("Warning: Audio file is empty", file=sys.stderr)
 
-        logger.info("Loading Whisper tiny model...")
-        model = whisper.load_model("tiny", download_root="/tmp", in_memory=False)
+        logger.info("Loading Whisper base model...")
+        model = whisper.load_model("base", download_root="/tmp", in_memory=False)
         logger.info("Model loaded successfully")
 
         logger.info(f"Transcribing file: {audio_file}")
-        result = model.transcribe(audio_file, fp16=False, language="en")  # Explicitly set language to English
+        result = model.transcribe(audio_file, fp16=False, language="en")
         transcription = result.get("text", "").strip()
 
-        logger.info(f"Raw transcription segments: {result.get('segments', [])}")  # Debug segments
+        logger.info(f"Raw transcription segments: {result.get('segments', [])}")
         logger.info(f"Transcription result: {transcription}")
         print(transcription if transcription else "No transcription detected")
 
