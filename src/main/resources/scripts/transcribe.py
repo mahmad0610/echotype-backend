@@ -8,7 +8,6 @@ logger = logging.getLogger(__name__)
 
 def main():
     try:
-        # Check if audio file path is provided
         if len(sys.argv) != 2:
             logger.error("Audio file path not provided")
             print("Error: Audio file path not provided", file=sys.stderr)
@@ -17,26 +16,25 @@ def main():
         audio_file = sys.argv[1]
         logger.info(f"Checking audio file: {audio_file}")
 
-        # Verify audio file exists and is readable
         if not os.path.exists(audio_file):
             logger.error(f"Audio file not found: {audio_file}")
             print(f"Error: Audio file not found: {audio_file}", file=sys.stderr)
             sys.exit(1)
-        if os.path.getsize(audio_file) == 0:
+        file_size = os.path.getsize(audio_file)
+        logger.info(f"Audio file size: {file_size} bytes")
+        if file_size == 0:
             logger.warning(f"Audio file is empty: {audio_file}")
             print("Warning: Audio file is empty", file=sys.stderr)
 
-        # Load the Whisper model
         logger.info("Loading Whisper tiny model...")
         model = whisper.load_model("tiny", download_root="/tmp", in_memory=False)
         logger.info("Model loaded successfully")
 
-        # Transcribe the audio file
         logger.info(f"Transcribing file: {audio_file}")
-        result = model.transcribe(audio_file, fp16=False)
+        result = model.transcribe(audio_file, fp16=False, language="en")  # Explicitly set language to English
         transcription = result.get("text", "").strip()
 
-        # Log and print the transcription result
+        logger.info(f"Raw transcription segments: {result.get('segments', [])}")  # Debug segments
         logger.info(f"Transcription result: {transcription}")
         print(transcription if transcription else "No transcription detected")
 
