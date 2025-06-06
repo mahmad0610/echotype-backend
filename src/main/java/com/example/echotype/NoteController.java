@@ -55,19 +55,25 @@ public class NoteController {
             ProcessBuilder whisperPb = new ProcessBuilder("python3", 
                                                         tempTranscribeScript.getAbsolutePath(), 
                                                         tempFile.getAbsolutePath());
-            whisperPb.redirectErrorStream(true);
+            // Do not redirect error stream to stdout to separate logs and transcription
             Process whisperProcess = whisperPb.start();
 
             StringBuilder transcriptionOutput = new StringBuilder();
-            StringBuilder transcriptionError = new StringBuilder();
-            // Capture stdout
+            StringBuilder transcriptionLogs = new StringBuilder();
+            // Capture stdout (transcription result)
             Thread stdoutThread = new Thread(() -> {
                 try (BufferedReader reader = new BufferedReader(
                         new InputStreamReader(whisperProcess.getInputStream()))) {
                     String line;
                     while ((line = reader.readLine()) != null) {
-                        logger.info("Transcription output: {}", line);
-                        transcriptionOutput.append(line).append("\n");
+                        // Check if the line looks like a log message (e.g., starts with timestamp)
+                        if (line.matches("\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2},\\d{3}\\s+\\[\\w+\\].*")) {
+                            logger.info("Transcription log: {}", line);
+                            transcriptionLogs.append(line).append("\n");
+                        } else {
+                            // Assume this is the actual transcription
+                            transcriptionOutput.append(line).append("\n");
+                        }
                     }
                 } catch (IOException e) {
                     logger.error("Error reading transcription stdout: {}", e.getMessage());
@@ -75,14 +81,14 @@ public class NoteController {
             });
             stdoutThread.start();
 
-            // Capture stderr
+            // Capture stderr (logs and errors)
             Thread stderrThread = new Thread(() -> {
                 try (BufferedReader reader = new BufferedReader(
                         new InputStreamReader(whisperProcess.getErrorStream()))) {
                     String line;
                     while ((line = reader.readLine()) != null) {
                         logger.error("Transcription error: {}", line);
-                        transcriptionError.append(line).append("\n");
+                        transcriptionLogs.append(line).append("\n");
                     }
                 } catch (IOException e) {
                     logger.error("Error reading transcription stderr: {}", e.getMessage());
@@ -104,8 +110,8 @@ public class NoteController {
 
             int whisperExitCode = whisperProcess.exitValue();
             if (whisperExitCode != 0) {
-                logger.error("Transcription failed with exit code: {}, error: {}", whisperExitCode, transcriptionError.toString());
-                response.put("error", "Transcription failed with code: " + whisperExitCode + ", error: " + transcriptionError.toString());
+                logger.error("Transcription failed with exit code: {}, logs: {}", whisperExitCode, transcriptionLogs.toString());
+                response.put("error", "Transcription failed with code: " + whisperExitCode + ", logs: " + transcriptionLogs.toString());
                 return response;
             }
 
@@ -181,8 +187,9 @@ public class NoteController {
             String formattedNotes = formattingOutput.toString().trim();
             logger.info("Formatting completed successfully: {}", formattedNotes);
 
+            // Include logs in the response for debugging
             response.put("transcription", transcription.isEmpty() ? "No transcription generated" : transcription);
-            response.put("formattedNotes", formattedNotes.isEmpty() ? "No notes generated" : formattedNotes);
+            response.put("formattedNotes", formattedNotes.isEmpty() ? transcriptionLogs.toString().trim() : formattedNotes);
             return response;
 
         } catch (IOException | InterruptedException e) {
