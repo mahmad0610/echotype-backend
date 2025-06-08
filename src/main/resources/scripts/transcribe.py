@@ -8,18 +8,22 @@ logger = logging.getLogger(__name__)
 
 def main():
     try:
-        if len(sys.argv) != 2:
-            logger.error("Audio file path not provided")
-            print("Error: Audio file path not provided", file=sys.stderr)
+        # Check command line arguments
+        if len(sys.argv) < 2 or len(sys.argv) > 3:
+            logger.error("Usage: python script.py <audio_file> [language_code]")
+            print("Error: Usage - python script.py <audio_file> [language_code]", file=sys.stderr)
             sys.exit(1)
 
         audio_file = sys.argv[1]
+        language = sys.argv[2] if len(sys.argv) == 3 else None  # Optional language code (e.g., "ur", "en", "hi")
+
         logger.info(f"Checking audio file: {audio_file}")
 
         if not os.path.exists(audio_file):
             logger.error(f"Audio file not found: {audio_file}")
             print(f"Error: Audio file not found: {audio_file}", file=sys.stderr)
             sys.exit(1)
+        
         file_size = os.path.getsize(audio_file)
         logger.info(f"Audio file size: {file_size} bytes")
         if file_size == 0:
@@ -30,8 +34,8 @@ def main():
         model = whisper.load_model("base", download_root="/tmp", in_memory=False)
         logger.info("Model loaded successfully")
 
-        logger.info(f"Transcribing file: {audio_file}")
-        result = model.transcribe(audio_file, fp16=False, language="en")
+        logger.info(f"Transcribing file: {audio_file} with language: {language or 'auto-detect'}")
+        result = model.transcribe(audio_file, fp16=False, language=language)  # Language can be None for auto-detect
         transcription = result.get("text", "").strip()
 
         logger.info(f"Raw transcription segments: {result.get('segments', [])}")
