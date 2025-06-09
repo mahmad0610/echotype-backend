@@ -30,7 +30,7 @@ def main():
             print("Warning: Audio file is empty", file=sys.stderr)
 
         logger.info("Loading Whisper tiny model...")
-        model = whisper.load_model("tiny", download_root="/tmp", in_memory=False)
+        model = whisper.load_model("base", download_root="/tmp", in_memory=False)
         logger.info("Model loaded successfully")
 
         logger.info(f"Transcribing file: {audio_file} with language: English")
